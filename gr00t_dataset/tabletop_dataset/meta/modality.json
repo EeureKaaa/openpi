@@ -1,0 +1,26 @@
+{
+    "state": {
+        "joint_state": {
+            "start": 0,
+            "end": 8
+        }
+    },
+    "action": {
+        "ee_action": {
+            "start": 0,
+            "end": 7
+        }
+    },
+    "video": {
+        "ego_view": {
+            "original_key": "observation.images.ego_view"
+        },
+        "wrist_view": {
+            "original_key": "observation.images.wrist_view"
+        }
+    },
+    "annotation": {
+        "human.action.task_description": {},
+        "human.validity": {}
+    }
+}
