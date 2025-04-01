@@ -35,7 +35,7 @@ REPO_NAME = "lr-2002/coin_dataset"
 #     "libero_object_no_noops",
 #     "libero_spatial_no_noops",
 # ]  # For simplicity we will combine multiple Libero datasets into one training dataset
-RAW_DATASET_NAMES = ["tabletop_dataset"]
+RAW_DATASET_NAMES = ["coin_dataset"]
 
 
 def main(data_dir: str, *, push_to_hub: bool = False):

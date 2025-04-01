@@ -1,6 +1,9 @@
 import concurrent.futures as futures
 import dataclasses
+import heapq
+import json
 import logging
+import os
 from typing import Protocol
 
 from etils import epath
@@ -159,3 +162,125 @@ def _merge_params(train_state: training_utils.TrainState, params: dict[str, at.P
     if train_state.params:
         return dataclasses.replace(train_state, ema_params=params["params"])
     return dataclasses.replace(train_state, params=params["params"])
+
+
+class BestCheckpointTracker:
+    """Tracks the best checkpoints based on loss values."""
+    
+    def __init__(self, checkpoint_dir: epath.Path, max_checkpoints: int = 3):
+        """Initialize the checkpoint tracker.
+        
+        Args:
+            checkpoint_dir: Directory where checkpoints are stored.
+            max_checkpoints: Maximum number of checkpoints to keep.
+        """
+        self.checkpoint_dir = checkpoint_dir
+        self.max_checkpoints = max_checkpoints
+        self.tracker_file = checkpoint_dir / "best_checkpoints.json"
+        self.best_checkpoints = []  # List of (loss, step) tuples
+        
+        # Load existing tracker if it exists
+        if self.tracker_file.exists():
+            try:
+                with open(self.tracker_file, "r") as f:
+                    data = json.load(f)
+                self.best_checkpoints = [(entry["loss"], entry["step"]) for entry in data["checkpoints"]]
+                # Convert to a heap for easy management
+                heapq.heapify(self.best_checkpoints)
+            except Exception as e:
+                logging.warning(f"Failed to load checkpoint tracker: {e}")
+                self.best_checkpoints = []
+    
+    def should_save(self, step: int, loss: float) -> bool:
+        """Determine if the current checkpoint should be saved.
+        
+        Args:
+            step: Current training step.
+            loss: Current loss value.
+            
+        Returns:
+            True if the checkpoint should be saved, False otherwise.
+        """
+        # Always save if we have fewer than max_checkpoints
+        if len(self.best_checkpoints) < self.max_checkpoints:
+            return True
+        
+        # Save if the current loss is better than the worst saved checkpoint
+        worst_loss = -self.best_checkpoints[0][0] if self.best_checkpoints else float('inf')
+        return loss < worst_loss
+    
+    def update(self, step: int, loss: float) -> int:
+        """Update the tracker with a new checkpoint.
+        
+        Args:
+            step: Current training step.
+            loss: Current loss value.
+            
+        Returns:
+            Step to remove, or -1 if no checkpoint should be removed.
+        """
+        # If we have fewer than max_checkpoints, just add the new one
+        if len(self.best_checkpoints) < self.max_checkpoints:
+            heapq.heappush(self.best_checkpoints, (-loss, step))
+            self._save_tracker()
+            return -1
+        
+        # If the current loss is better than the worst saved checkpoint, replace it
+        worst_loss, worst_step = self.best_checkpoints[0]
+        if loss < -worst_loss:
+            heapq.heapreplace(self.best_checkpoints, (-loss, step))
+            self._save_tracker()
+            return worst_step
+        
+        return -1
+    
+    def _save_tracker(self):
+        """Save the tracker to disk."""
+        data = {
+            "checkpoints": [
+                {"loss": -loss, "step": step} 
+                for loss, step in self.best_checkpoints
+            ]
+        }
+        with open(self.tracker_file, "w") as f:
+            json.dump(data, f, indent=2)
+
+
+def save_best_checkpoints(
+    checkpoint_manager: ocp.CheckpointManager,
+    state: training_utils.TrainState,
+    data_loader: _data_loader.DataLoader,
+    step: int,
+    loss: float,
+    max_checkpoints: int = 3,
+):
+    """Save checkpoint if it's among the best based on loss.
+    
+    Args:
+        checkpoint_manager: Orbax checkpoint manager.
+        state: Current training state.
+        data_loader: Data loader.
+        step: Current training step.
+        loss: Current loss value.
+        max_checkpoints: Maximum number of checkpoints to keep.
+    """
+    checkpoint_dir = epath.Path(checkpoint_manager._directory)
+    tracker = BestCheckpointTracker(checkpoint_dir, max_checkpoints)
+    
+    # Check if we should save this checkpoint
+    if tracker.should_save(step, loss):
+        # Save the current checkpoint
+        save_state(checkpoint_manager, state, data_loader, step)
+        
+        # Update the tracker and potentially remove the worst checkpoint
+        step_to_remove = tracker.update(step, loss)
+        
+        # Remove the worst checkpoint if needed
+        if step_to_remove >= 0 and step_to_remove != step:
+            try:
+                checkpoint_manager.delete(step_to_remove)
+                logging.info(f"Removed checkpoint at step {step_to_remove} with higher loss")
+            except Exception as e:
+                logging.warning(f"Failed to remove checkpoint at step {step_to_remove}: {e}")
+    else:
+        logging.info(f"Skipping checkpoint at step {step} with loss {loss:.4f} as it's not among the best")

@@ -489,7 +489,7 @@ _CONFIGS = [
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
         data=LeRobotLiberoDataConfig(
-            repo_id="EeureKaaaa/libero",
+            repo_id="EeureKaaaa/tabletop_dataset",
             base_config=DataConfig(
                 local_files_only=True,  # Set to True for local-only datasets.
                 # This flag determines whether we load the prompt (i.e. the task instruction) from the
@@ -542,7 +542,7 @@ _CONFIGS = [
         # you see many warnings being thrown during training.
         model=pi0_fast.Pi0FASTConfig(action_dim=7, action_horizon=10, max_token_len=180),
         data=LeRobotLiberoDataConfig(
-            repo_id="EeureKaaaa/tabletop_dataset",
+            repo_id="lr-2002/coin_dataset",
             base_config=DataConfig(
                 local_files_only=True,  # Set to True for local-only datasets.
                 prompt_from_task=True,
@@ -550,7 +550,7 @@ _CONFIGS = [
         ),
         # Note that we load the pi0-FAST base model checkpoint here.
         weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_fast_base/params"),
-        num_train_steps=30_000,
+        num_train_steps=150_000,
         batch_size=16,
     ),
     TrainConfig(
