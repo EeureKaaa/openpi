@@ -28,14 +28,14 @@ import cv2
 
 
 # Name of the output dataset, also used for the Hugging Face Hub
-REPO_NAME = "lr-2002/coin_dataset"
+REPO_NAME = "coin-dataset/primitive_dataset_v1"
 # RAW_DATASET_NAMES = [
 #     "libero_10_no_noops",
 #     "libero_goal_no_noops",
 #     "libero_object_no_noops",
 #     "libero_spatial_no_noops",
 # ]  # For simplicity we will combine multiple Libero datasets into one training dataset
-RAW_DATASET_NAMES = ["coin_dataset"]
+RAW_DATASET_NAMES = ["primitive_dataset_v1"]
 
 
 def main(data_dir: str, *, push_to_hub: bool = False):
@@ -57,7 +57,22 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                 "shape": (256, 256, 3),
                 "names": ["height", "width", "channel"],
             },
+            "base_front_image": {
+                "dtype": "image",
+                "shape": (256, 256, 3),
+                "names": ["height", "width", "channel"],
+            },
             "wrist_image": {
+                "dtype": "image",
+                "shape": (256, 256, 3),
+                "names": ["height", "width", "channel"],
+            },
+            "left_image": {
+                "dtype": "image",
+                "shape": (256, 256, 3),
+                "names": ["height", "width", "channel"],
+            },
+            "right_image": {
                 "dtype": "image",
                 "shape": (256, 256, 3),
                 "names": ["height", "width", "channel"],
@@ -87,13 +102,22 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                 # Resize images to 256x256
                 img_resized = cv2.resize(
                     step["observation"]["image"], (256, 256), interpolation=cv2.INTER_LANCZOS4)
+                base_front_img_resized = cv2.resize(
+                    step["observation"]["base_front_image"], (256, 256), interpolation=cv2.INTER_LANCZOS4)
                 wrist_img_resized = cv2.resize(
                     step["observation"]["wrist_image"], (256, 256), interpolation=cv2.INTER_LANCZOS4)
+                left_img_resized = cv2.resize(
+                    step["observation"]["left_image"], (256, 256), interpolation=cv2.INTER_LANCZOS4)
+                right_img_resized = cv2.resize(
+                    step["observation"]["right_image"], (256, 256), interpolation=cv2.INTER_LANCZOS4)
 
                 dataset.add_frame(
                     {
                         "image": img_resized,
+                        "base_front_image": base_front_img_resized,
                         "wrist_image": wrist_img_resized,
+                        "left_image": left_img_resized,
+                        "right_image": right_img_resized,
                         "state": step["observation"]["state"],
                         "actions": step["action"],
                     }
