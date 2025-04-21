@@ -63,8 +63,9 @@ def create_directory_structure(output_dir):
     """Create the necessary directory structure for GR00T LeRobot format."""
     os.makedirs(os.path.join(output_dir, 'meta'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'data', 'chunk-000'), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, 'videos', 'chunk-000', 'observation.images.ego_view'), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'videos', 'chunk-000', 'observation.images.base_view'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'videos', 'chunk-000', 'observation.images.wrist_view'), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'videos', 'chunk-000', 'observation.images.left_view'), exist_ok=True)
     
     print(f"Created directory structure in {output_dir}")
 
