@@ -238,19 +238,19 @@ def process_episode(episode, episode_idx, output_dir, args):
     """Process a single episode from RLDS and convert to GR00T LeRobot format."""
     # Extract steps from the episode
     steps = list(episode["steps"].as_numpy_iterator())
-    
+
     # Skip empty episodes
     if not steps:
         print(f"Warning: Episode {episode_idx} is empty, skipping")
         return None
-    
+
     # Extract task description
     task_description = steps[0]["language_instruction"].decode()
-    
+
     # Create lists to store frames for video generation
     main_frames = []
     wrist_frames = []
-    
+
     # Create lists to store data for parquet file
     observation_states = []
     actions = []
@@ -258,7 +258,7 @@ def process_episode(episode, episode_idx, output_dir, args):
     task_indices = []
     next_rewards = []
     next_dones = []
-    
+
     # Process each step in the episode
     for i, step in enumerate(steps):
         # Extract and resize images
@@ -268,36 +268,36 @@ def process_episode(episode, episode_idx, output_dir, args):
         wrist_img = cv2.resize(step["observation"]["wrist_image"], 
                               (args.resize_dim, args.resize_dim), 
                               interpolation=cv2.INTER_LANCZOS4)
-        
+
         # Add frames for video generation
         main_frames.append(main_img)
         wrist_frames.append(wrist_img)
-        
+
         # Extract state and action
         state = step["observation"]["state"]
         action = step["action"]
-        
+
         # Add data for parquet file
         observation_states.append(state)
         actions.append(action)
         timestamps.append(float(i) / args.fps)  # Calculate timestamp based on frame index and fps
         task_indices.append(0)  # Will be updated later with the correct task index
-        
+
         # Extract reward and done flag for next step
         next_rewards.append(float(step["reward"]))
         next_dones.append(bool(step["is_last"]))
-    
+
     # Generate videos
     main_video_path = os.path.join(output_dir, 'videos', 'chunk-000', 'observation.images.ego_view', f'episode_{episode_idx:06d}.mp4')
     wrist_video_path = os.path.join(output_dir, 'videos', 'chunk-000', 'observation.images.wrist_view', f'episode_{episode_idx:06d}.mp4')
-    
+
     main_video_success = create_video_from_frames(main_frames, main_video_path, args.fps)
     wrist_video_success = create_video_from_frames(wrist_frames, wrist_video_path, args.fps)
-    
+
     if not (main_video_success and wrist_video_success):
         print(f"Warning: Failed to create videos for episode {episode_idx}, skipping")
         return None
-    
+
     # Create DataFrame for parquet file
     df_data = {
         "observation.state": observation_states,
@@ -310,8 +310,7 @@ def process_episode(episode, episode_idx, output_dir, args):
         "next.done": next_dones,
         # We'll add annotation columns later after we have the task indices
     }
-    
-    # Return episode data
+
     return {
         "episode_idx": episode_idx,
         "task_description": task_description,
