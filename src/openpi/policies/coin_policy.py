@@ -64,7 +64,7 @@ class CoinInputs(transforms.DataTransformFn):
         # and two wrist views (left and right). If your dataset does not have a particular type
         # of image, e.g. wrist images, you can comment it out here and replace it with zeros like we do for the
         # right wrist image below.
-        base_image = _parse_image(data["observation/image"])
+        base_front_image = _parse_image(data["observation/base_front_image"])
         left_image = _parse_image(data["observation/left_image"])
         wrist_image = _parse_image(data["observation/wrist_image"])
 
@@ -72,14 +72,14 @@ class CoinInputs(transforms.DataTransformFn):
         inputs = {
             "state": state,
             "image": {
-                "base_0_rgb": base_image,
+                "base_front_0_rgb": base_front_image,
                 "left_0_rgb": left_image,
                 "left_wrist_0_rgb": wrist_image,
                 # Pad any non-existent images with zero-arrays of the appropriate shape.
-                "right_wrist_0_rgb": np.zeros_like(base_image),
+                "right_wrist_0_rgb": np.zeros_like(base_front_image),
             },
             "image_mask": {
-                "base_0_rgb": np.True_,
+                "base_front_0_rgb": np.True_,
                 "left_0_rgb": np.True_,
                 "left_wrist_0_rgb": np.True_,
                 # Mask any non-existent images with False (if ``mask_padding`` is True).
