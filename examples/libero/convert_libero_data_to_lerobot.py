@@ -28,14 +28,14 @@ import cv2
 
 
 # Name of the output dataset, also used for the Hugging Face Hub
-REPO_NAME = "coin-dataset/primitive_dataset_v1"
+REPO_NAME = "coin-dataset/primitive_dataset_v4"
 # RAW_DATASET_NAMES = [
 #     "libero_10_no_noops",
 #     "libero_goal_no_noops",
 #     "libero_object_no_noops",
 #     "libero_spatial_no_noops",
 # ]  # For simplicity we will combine multiple Libero datasets into one training dataset
-RAW_DATASET_NAMES = ["primitive_dataset_v1"]
+RAW_DATASET_NAMES = ["coin_primitive_dataset"]
 
 
 def main(data_dir: str, *, push_to_hub: bool = False):
@@ -52,7 +52,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
         robot_type="panda",
         fps=10,
         features={
-            "image": {
+            "human_image": {
                 "dtype": "image",
                 "shape": (256, 256, 3),
                 "names": ["height", "width", "channel"],
@@ -100,8 +100,8 @@ def main(data_dir: str, *, push_to_hub: bool = False):
         for episode in raw_dataset:
             for step in episode["steps"].as_numpy_iterator():
                 # Resize images to 256x256
-                img_resized = cv2.resize(
-                    step["observation"]["image"], (256, 256), interpolation=cv2.INTER_LANCZOS4)
+                human_img_resized = cv2.resize(
+                    step["observation"]["human_image"], (256, 256), interpolation=cv2.INTER_LANCZOS4)
                 base_front_img_resized = cv2.resize(
                     step["observation"]["base_front_image"], (256, 256), interpolation=cv2.INTER_LANCZOS4)
                 wrist_img_resized = cv2.resize(
@@ -113,7 +113,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
 
                 dataset.add_frame(
                     {
-                        "image": img_resized,
+                        "human_image": human_img_resized,
                         "base_front_image": base_front_img_resized,
                         "wrist_image": wrist_img_resized,
                         "left_image": left_img_resized,

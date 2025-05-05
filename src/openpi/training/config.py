@@ -361,7 +361,7 @@ class LeRobotCoinDataConfig(DataConfigFactory):
                 _transforms.RepackTransform(
                     {
                         "observation/base_front_image": "base_front_image",
-                        "observation/left_image": "left_image",
+                        "observation/human_image": "human_image",
                         "observation/wrist_image": "wrist_image",
                         "observation/state": "state",
                         "actions": "actions",
@@ -643,7 +643,7 @@ _CONFIGS = [
         model=pi0_fast.Pi0FASTConfig(
             action_dim=7, action_horizon=10, max_token_len=180),
         data=LeRobotCoinDataConfig(
-            repo_id="coin-dataset/primitive_dataset",
+            repo_id="coin-dataset/primitive_dataset_v4",
             base_config=DataConfig(
                 local_files_only=True,  # Set to True for local-only datasets.
                 prompt_from_task=True,

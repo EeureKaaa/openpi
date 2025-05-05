@@ -120,6 +120,16 @@ def create_video_from_frames(frames, output_path, fps=10):
     video.release()
     return True
 
+def create_videos_for_episode(episode_idx, base_frames, wrist_frames, left_frames, output_dir, args):
+    base_video_path = os.path.join(output_dir, 'videos', 'chunk-000', 'observation.images.base_view', f'episode_{episode_idx:06d}.mp4')
+    wrist_video_path = os.path.join(output_dir, 'videos', 'chunk-000', 'observation.images.wrist_view', f'episode_{episode_idx:06d}.mp4')
+    left_video_path = os.path.join(output_dir, 'videos', 'chunk-000', 'observation.images.left_view', f'episode_{episode_idx:06d}.mp4')
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        # Create videos in parallel
+        executor.submit(create_video_from_frames, base_frames, base_video_path, args.fps)
+        executor.submit(create_video_from_frames, wrist_frames, wrist_video_path, args.fps)
+        executor.submit(create_video_from_frames, left_frames, left_video_path, args.fps)
 
 def create_modality_json(output_dir, args):
     """Create the modality.json file for GR00T LeRobot format."""
@@ -388,6 +398,28 @@ def process_episode(h5_dataset, episode_idx, output_dir, args, env_name=None, ta
         "df_data": df_data
     }
 
+def process_episode_parallel(h5_file):
+    try:
+        with h5py.File(h5_file, 'r') as h5_dataset:
+            episode_data = process_episode(h5_dataset, episode_idx, output_dir, args,
+                                            env_name=env_name, task_instruction=task_instruction)
+
+            if episode_data:
+                # Use the task index we already determined for this environment
+                for i in range(len(episode_data["df_data"]["task_index"])):
+                    episode_data["df_data"]["task_index"][i] = task_idx
+
+                # Add annotation columns
+                episode_data["df_data"]["annotation.human.action.task_description"] = [
+                    task_idx] * len(episode_data["df_data"]["task_index"])
+                episode_data["df_data"]["annotation.human.validity"] = [
+                    1] * len(episode_data["df_data"]["task_index"])  # Assuming all data is valid
+
+                episodes_data.append(episode_data)
+                episode_idx += 1  # Increment episode index for next episode
+    except Exception as e:
+        print(f"Error processing {h5_file}: {e}")
+    return None
 
 def main():
     args = parse_args()
@@ -450,27 +482,6 @@ def main():
             print(f"Processing {h5_file}...")
             start_time = time.time()
 
-            try:
-                with h5py.File(h5_file, 'r') as h5_dataset:
-                    episode_data = process_episode(h5_dataset, episode_idx, output_dir, args,
-                                                   env_name=env_name, task_instruction=task_instruction)
-
-                    if episode_data:
-                        # Use the task index we already determined for this environment
-                        for i in range(len(episode_data["df_data"]["task_index"])):
-                            episode_data["df_data"]["task_index"][i] = task_idx
-
-                        # Add annotation columns
-                        episode_data["df_data"]["annotation.human.action.task_description"] = [
-                            task_idx] * len(episode_data["df_data"]["task_index"])
-                        episode_data["df_data"]["annotation.human.validity"] = [
-                            1] * len(episode_data["df_data"]["task_index"])  # Assuming all data is valid
-
-                        episodes_data.append(episode_data)
-                        episode_idx += 1  # Increment episode index for next episode
-            except Exception as e:
-                print(f"Error processing {h5_file}: {e}")
-                continue
 
             end_time = time.time()
             print(

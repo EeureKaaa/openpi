@@ -41,24 +41,24 @@ import io
 from PIL import Image
 import time
 import h5py
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import multiprocessing
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Convert h5 dataset to GR00T-compatible LeRobot format')
-    parser.add_argument('--data_dir', type=str, default='/home/wangxianhao/data/project/reasoning/coin_filtered',
+    parser.add_argument('--data_dir', type=str, default='/home/wangxianhao/data/project/reasoning/coin_primitive_data',
                         help='Directory containing environment directories with h5 files')
     parser.add_argument('--output_dir', type=str, default='/home/wangxianhao/data/project/reasoning/openpi/gr00t_dataset',
                         help='Output directory for GR00T LeRobot dataset')
     parser.add_argument('--dataset_name', type=str,
-                        default='primitive_dataset', help='Name of the dataset')
+                        default='primitive_dataset_v3', help='Name of the dataset')
     parser.add_argument('--fps', type=int, default=10,
                         help='FPS for generated videos')
     parser.add_argument('--resize_dim', type=int, default=256,
                         help='Resize dimension for images')
-    parser.add_argument('--chunk_size', type=int, default=1000,
+    parser.add_argument('--chunk_size', type=int, default=1500,
                         help='Number of episodes per chunk')
     parser.add_argument('--state_dim', type=int, default=8,
                         help='Dimension of the state vector (qpos)')
@@ -76,11 +76,11 @@ def create_directory_structure(output_dir):
     os.makedirs(os.path.join(output_dir, 'meta'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'data', 'chunk-000'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'videos', 'chunk-000',
-                'observation.images.base_view'), exist_ok=True)
+                'observation.images.human_view'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'videos', 'chunk-000',
                 'observation.images.wrist_view'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'videos', 'chunk-000',
-                'observation.images.left_view'), exist_ok=True)
+                'observation.images.base_front_view'), exist_ok=True)
 
     print(f"Created directory structure in {output_dir}")
 
@@ -94,16 +94,27 @@ def create_video_from_frames(frames, output_path, fps=10):
     # Get frame dimensions
     height, width = frames[0].shape[:2]
 
-    # Create video writer
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    # Try to use hardware acceleration with H.264 encoding
+    try:
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 encoding with potential hardware acceleration
+        # Check if image is grayscale or color
+        is_color = len(frames[0].shape) == 3 and frames[0].shape[2] == 3
+        video = cv2.VideoWriter(output_path, fourcc, fps,
+                                (width, height), isColor=is_color,
+                                apiPreference=cv2.CAP_FFMPEG)
+        
+        # If video writer fails to initialize with H.264, fall back to mp4v
+        if not video.isOpened():
+            raise Exception("Failed to initialize video writer with H.264 codec")
+    except Exception as e:
+        # Fall back to mp4v codec if hardware acceleration is not available
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        is_color = len(frames[0].shape) == 3 and frames[0].shape[2] == 3
+        video = cv2.VideoWriter(output_path, fourcc, fps,
+                                (width, height), isColor=is_color)
 
-    # Check if image is grayscale or color
-    is_color = len(frames[0].shape) == 3 and frames[0].shape[2] == 3
-    video = cv2.VideoWriter(output_path, fourcc, fps,
-                            (width, height), isColor=is_color)
-
-    # Write frames to video
-    for frame in frames:
+    # Write frames to video with progress bar
+    for frame in tqdm(frames, desc=f"Creating video {os.path.basename(output_path)}", leave=False):
         # Convert to uint8 if needed
         if frame.dtype != np.uint8:
             frame = (frame * 255).astype(np.uint8)
@@ -137,14 +148,14 @@ def create_modality_json(output_dir, args):
             }
         },
         "video": {
-            "base_view": {
-                "original_key": "observation.images.base_view"
+            "human_view": {
+                "original_key": "observation.images.human_view"
             },
             "wrist_view": {
                 "original_key": "observation.images.wrist_view"
             },
-            "left_view": {
-                "original_key": "observation.images.left_view"
+            "base_front_view": {
+                "original_key": "observation.images.base_front_view"
             },
         },
         "annotation": {
@@ -179,9 +190,9 @@ def create_info_json(output_dir, dataset_name, args, total_episodes, total_frame
         "total_episodes": total_episodes,
         "total_frames": total_frames,
         "total_tasks": total_tasks,
-        "total_videos": total_episodes * 3,  # Base, wrist and left views
+        "total_videos": total_episodes * 3,  # human_view, wrist_view and base_front_view
         "total_chunks": 1,
-        "chunks_size": 1000,
+        "chunks_size": 1500,
         "fps": args.fps,
         "splits": {
             "train": "0:100"
@@ -191,7 +202,7 @@ def create_info_json(output_dir, dataset_name, args, total_episodes, total_frame
 
         # Features field required by GR00T
         "features": {
-            "observation.images.base_view": {
+            "observation.images.human_view": {
                 "dtype": "video",
                 "shape": [args.resize_dim, args.resize_dim, 3],
                 "names": ["height", "width", "channel"],
@@ -215,7 +226,7 @@ def create_info_json(output_dir, dataset_name, args, total_episodes, total_frame
                     "has_audio": False
                 }
             },
-            "observation.images.left_view": {
+            "observation.images.base_front_view": {
                 "dtype": "video",
                 "shape": [args.resize_dim, args.resize_dim, 3],
                 "names": ["height", "width", "channel"],
@@ -261,10 +272,6 @@ def create_info_json(output_dir, dataset_name, args, total_episodes, total_frame
                 "dtype": "int64",
                 "shape": [1]
             },
-            "next.reward": {
-                "dtype": "float64",
-                "shape": [1]
-            },
             "next.done": {
                 "dtype": "float64",
                 "shape": [1]
@@ -286,7 +293,7 @@ def process_episode(h5_dataset, episode_idx, output_dir, args, env_name=None, ta
     # Extract dimensions
     actions = traj_group['actions']
     num_actions = actions.shape[0]
-    print(f"Number of actions: {num_actions}")
+    print(f"Episode {episode_idx}: Number of actions: {num_actions}")
 
     # Skip episodes with too few actions
     if num_actions < 8:
@@ -295,9 +302,9 @@ def process_episode(h5_dataset, episode_idx, output_dir, args, env_name=None, ta
         return None
 
     # Create lists to store frames for video generation
-    base_frames = []  # base camera
+    human_frames = []  # human camera
     wrist_frames = []  # wrist camera
-    left_frames = []  # left camera
+    base_front_frames = []  # base front camera
 
     # Create lists to store data for parquet file
     observation_states = []
@@ -308,22 +315,22 @@ def process_episode(h5_dataset, episode_idx, output_dir, args, env_name=None, ta
     next_dones = []
 
     # Process each step in the episode (using action length as our step count)
-    for i in range(num_actions):
-        # Extract camera data
-        base_img = cv2.resize(traj_group['obs']['sensor_data']['base_camera']['rgb'][i],
+    for i in tqdm(range(num_actions), desc=f"Processing frames for episode {episode_idx}", leave=False):
+        # Extract camera data - using INTER_LINEAR for faster resizing
+        human_img = cv2.resize(traj_group['obs']['sensor_data']['human_camera']['rgb'][i],
                               (args.resize_dim, args.resize_dim),
-                              interpolation=cv2.INTER_LANCZOS4)
+                              interpolation=cv2.INTER_LINEAR)
         wrist_img = cv2.resize(traj_group['obs']['sensor_data']['hand_camera']['rgb'][i],
                                (args.resize_dim, args.resize_dim),
-                               interpolation=cv2.INTER_LANCZOS4)
-        left_img = cv2.resize(traj_group['obs']['sensor_data']['left_camera']['rgb'][i],
+                               interpolation=cv2.INTER_LINEAR)
+        base_front_img = cv2.resize(traj_group['obs']['sensor_data']['base_front_camera']['rgb'][i],
                               (args.resize_dim, args.resize_dim),
-                              interpolation=cv2.INTER_LANCZOS4)
+                              interpolation=cv2.INTER_LINEAR)
 
         # Frames
-        base_frames.append(base_img)
+        human_frames.append(human_img)
         wrist_frames.append(wrist_img)
-        left_frames.append(left_img)
+        base_front_frames.append(base_front_img)
 
         # Extract state and action
         state = traj_group['obs']['agent']['qpos'][i][:8]
@@ -338,31 +345,30 @@ def process_episode(h5_dataset, episode_idx, output_dir, args, env_name=None, ta
         task_indices.append(0)
 
         # Extract reward and done flag for next step
-        next_rewards.append(float(traj_group['rewards'][i]))
+        # next_rewards.append(float(traj_group['rewards'][i]))
         next_dones.append(
             bool(traj_group['terminated'][i] or traj_group['truncated'][i]))
 
-    # Generate videos if needed
-    base_video_success = True
-    wrist_video_success = True
-    left_video_success = True
-
-    # Generate videos
-    base_video_path = os.path.join(output_dir, 'videos', 'chunk-000',
-                                   'observation.images.base_view', f'episode_{episode_idx:06d}.mp4')
+    # Generate videos in parallel
+    human_video_path = os.path.join(output_dir, 'videos', 'chunk-000',
+                                'observation.images.human_view', f'episode_{episode_idx:06d}.mp4')
     wrist_video_path = os.path.join(output_dir, 'videos', 'chunk-000',
-                                    'observation.images.wrist_view', f'episode_{episode_idx:06d}.mp4')
-    left_video_path = os.path.join(output_dir, 'videos', 'chunk-000',
-                                   'observation.images.left_view', f'episode_{episode_idx:06d}.mp4')
+                                 'observation.images.wrist_view', f'episode_{episode_idx:06d}.mp4')
+    base_front_video_path = os.path.join(output_dir, 'videos', 'chunk-000',
+                                'observation.images.base_front_view', f'episode_{episode_idx:06d}.mp4')
 
-    base_video_success = create_video_from_frames(
-        base_frames, base_video_path, args.fps)
-    wrist_video_success = create_video_from_frames(
-        wrist_frames, wrist_video_path, args.fps)
-    left_video_success = create_video_from_frames(
-        left_frames, left_video_path, args.fps)
+    print(f"Creating videos for episode {episode_idx} in parallel...")
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        human_future = executor.submit(create_video_from_frames, human_frames, human_video_path, args.fps)
+        wrist_future = executor.submit(create_video_from_frames, wrist_frames, wrist_video_path, args.fps)
+        base_front_future = executor.submit(create_video_from_frames, base_front_frames, base_front_video_path, args.fps)
+        
+        # Get results
+        human_video_success = human_future.result()
+        wrist_video_success = wrist_future.result()
+        base_front_video_success = base_front_future.result()
 
-    if not (base_video_success and wrist_video_success and left_video_success):
+    if not (human_video_success and wrist_video_success and base_front_video_success):
         print(
             f"Warning: Failed to create videos for episode {episode_idx}, skipping")
         return None
@@ -375,7 +381,7 @@ def process_episode(h5_dataset, episode_idx, output_dir, args, env_name=None, ta
         "task_index": task_indices,
         "episode_index": [episode_idx] * num_actions,
         "index": list(range(num_actions)),
-        "next.reward": next_rewards,
+        # "next.reward": next_rewards,
         "next.done": next_dones,
         # We'll add annotation columns later after we have the task indices
     }
@@ -387,6 +393,44 @@ def process_episode(h5_dataset, episode_idx, output_dir, args, env_name=None, ta
         "length": num_actions,
         "df_data": df_data
     }
+
+
+
+
+
+def process_h5_file(args_tuple):
+    """Process a single H5 file and return the episode data.
+    This function is designed to be used with multiprocessing."""
+    h5_path, episode_idx, output_dir, args, env_name, task_instruction, task_idx = args_tuple
+    start_time = time.time()
+    file_name = os.path.basename(h5_path)
+    
+    try:
+        # Open the h5 file with memory mapping for faster access
+        with h5py.File(h5_path, 'r', libver='latest', swmr=True) as h5_dataset:
+            episode_data = process_episode(h5_dataset, episode_idx, output_dir, args,
+                                          env_name=env_name, task_instruction=task_instruction)
+            if episode_data:
+                # Use the task index we already determined for this environment
+                for i in range(len(episode_data["df_data"]["task_index"])):
+                    episode_data["df_data"]["task_index"][i] = task_idx
+
+                # Add annotation columns
+                # Store the index of the task in tasks.jsonl, not the task text itself
+                episode_data["df_data"]["annotation.human.action.task_description"] = [
+                    task_idx] * len(episode_data["df_data"]["task_index"])
+                episode_data["df_data"]["annotation.human.validity"] = [
+                    1] * len(episode_data["df_data"]["task_index"])  # Assuming all data is valid
+                
+                end_time = time.time()
+                print(f"Process {os.getpid()}: Finished processing {file_name} in {end_time - start_time:.2f} seconds")
+                return episode_data, episode_idx
+            else:
+                print(f"Process {os.getpid()}: No valid episode data in {file_name}")
+                return None, episode_idx
+    except Exception as e:
+        print(f"Process {os.getpid()}: Error processing {file_name}: {e}")
+        return None, episode_idx
 
 
 def main():
@@ -403,8 +447,7 @@ def main():
         try:
             with open(args.inst_path, 'r') as f:
                 env_instructions = json.load(f)
-            print(
-                f"Loaded {len(env_instructions)} environment instructions from {args.inst_path}")
+            print(f"Loaded {len(env_instructions)} environment instructions from {args.inst_path}")
         except Exception as e:
             print(f"Error loading environment instructions: {e}")
             env_instructions = {}
@@ -422,15 +465,21 @@ def main():
     tasks = {}
     task_index_counter = 0
     episode_idx = 0
+    
+    # Determine number of processes
+    num_processes = min(multiprocessing.cpu_count(), 16)  # Limit to 8 processes max
+    print(f"Using {num_processes} processes for parallel processing")
+    
+    # Collect all processing jobs
+    processing_jobs = []
 
-    # Process each environment directory
-    for env_name in env_dirs:
+    # Gather all jobs from all environments
+    for env_name in tqdm(env_dirs, desc="Preparing environment directories"):
         env_dir = os.path.join(args.data_dir, env_name)
-        print(f"\nProcessing environment: {env_name}")
+        print(f"Preparing environment: {env_name}")
 
         # Get instruction for this environment
-        task_instruction = env_instructions.get(
-            env_name, f"Task for {env_name}")
+        task_instruction = env_instructions.get(env_name, f"Task for {env_name}")
 
         # Check if this task already exists
         if task_instruction not in tasks:
@@ -441,60 +490,75 @@ def main():
         print(f"Task: {task_instruction} (Index: {task_idx})")
 
         # Find all h5 files in this environment directory
-        h5_files = glob.glob(os.path.join(
-            env_dir, '**', '*.h5'), recursive=True)
-        print(f"Found {len(h5_files)} h5 files in {env_dir}")
-
-        # Process each h5 file in this environment
-        for h5_file in h5_files:
-            print(f"Processing {h5_file}...")
-            start_time = time.time()
-
-            try:
-                with h5py.File(h5_file, 'r') as h5_dataset:
-                    episode_data = process_episode(h5_dataset, episode_idx, output_dir, args,
-                                                   env_name=env_name, task_instruction=task_instruction)
-
-                    if episode_data:
-                        # Use the task index we already determined for this environment
-                        for i in range(len(episode_data["df_data"]["task_index"])):
-                            episode_data["df_data"]["task_index"][i] = task_idx
-
-                        # Add annotation columns
-                        episode_data["df_data"]["annotation.human.action.task_description"] = [
-                            task_idx] * len(episode_data["df_data"]["task_index"])
-                        episode_data["df_data"]["annotation.human.validity"] = [
-                            1] * len(episode_data["df_data"]["task_index"])  # Assuming all data is valid
-
-                        episodes_data.append(episode_data)
-                        episode_idx += 1  # Increment episode index for next episode
-            except Exception as e:
-                print(f"Error processing {h5_file}: {e}")
-                continue
-
-            end_time = time.time()
-            print(
-                f"Finished processing {h5_file} in {end_time - start_time:.2f} seconds")
+        h5_files = [os.path.join(env_dir, f) for f in os.listdir(env_dir) if f.endswith('.h5')]
+        print(f"Found {len(h5_files)} h5 files in {env_name}")
+        
+        # Create a job for each h5 file
+        for h5_path in h5_files:
+            job = (h5_path, episode_idx, output_dir, args, env_name, task_instruction, task_idx)
+            processing_jobs.append(job)
+            episode_idx += 1  # Reserve this episode index
+    
+    print(f"Prepared {len(processing_jobs)} processing jobs across all environments")
+    
+    # Process all jobs in parallel using a process pool
+    results = []
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        # Use imap to get results as they complete
+        for result in tqdm(pool.imap(process_h5_file, processing_jobs), 
+                          total=len(processing_jobs),
+                          desc="Processing all H5 files"):
+            if result[0] is not None:  # If processing succeeded
+                results.append(result)
+    
+    # Sort results by episode index and extract episode data
+    results.sort(key=lambda x: x[1])  # Sort by episode index
+    episodes_data = [result[0] for result in results if result[0] is not None]
+    
+    print(f"Successfully processed {len(episodes_data)} episodes")
 
     # Create tasks.jsonl
     with open(os.path.join(output_dir, 'meta', 'tasks.jsonl'), 'w') as f:
         for task, task_idx in tasks.items():
             f.write(json.dumps({"task_index": task_idx, "task": task}) + '\n')
-
+    
     print(f"Created tasks.jsonl with {len(tasks)} tasks")
-
-    # Create episodes.jsonl
+    
+    # Create episodes.jsonl file
     with open(os.path.join(output_dir, 'meta', 'episodes.jsonl'), 'w') as f:
-        for episode_data in episodes_data:
-            episode_entry = {
-                "episode_index": episode_data["episode_idx"],
-                # Assuming all episodes are valid
-                "tasks": [episode_data["task_description"], "valid"],
-                "length": episode_data["length"]
+        for episode in episodes_data:
+            episode_info = {
+                "episode_index": episode["episode_idx"],
+                "tasks": [episode["task_description"], "valid"],
+                "length": episode["length"]
             }
-            f.write(json.dumps(episode_entry) + '\n')
+            f.write(json.dumps(episode_info) + '\n')
 
     print(f"Created episodes.jsonl with {len(episodes_data)} episodes")
+    
+    # Create parquet files for each episode
+    for episode in tqdm(episodes_data, desc="Creating parquet files"):
+        # Create DataFrame
+        df = pd.DataFrame(episode["df_data"])
+        
+        # Convert to PyArrow Table
+        table = pa.Table.from_pandas(df)
+        
+        # Save to parquet file
+        episode_file = os.path.join(output_dir, 'data', 'chunk-000', f'episode_{episode["episode_idx"]:06d}.parquet')
+        pq.write_table(table, episode_file)
+    
+    print(f"Created {len(episodes_data)} parquet files")
+    
+    # Create info.json with dataset information
+    total_episodes = len(episodes_data)
+    total_frames = sum(episode["length"] for episode in episodes_data)
+    total_tasks = len(tasks)
+    
+    create_info_json(output_dir, args.dataset_name, args, total_episodes, total_frames, total_tasks)
+    print(f"Created info.json with {total_episodes} episodes, {total_frames} frames, and {total_tasks} tasks")
+    
+    print("\nConversion complete! Dataset is ready for GR00T LeRobot format.")
 
     # Create parquet files
     for episode_data in tqdm(episodes_data, desc="Creating parquet files"):
@@ -505,7 +569,7 @@ def main():
             "observation.state", "action", "timestamp",
             "annotation.human.action.task_description", "task_index",
             "annotation.human.validity", "episode_index", "index",
-            "next.reward", "next.done"
+            "next.done"
         ]
 
         # Reorder columns and save parquet file

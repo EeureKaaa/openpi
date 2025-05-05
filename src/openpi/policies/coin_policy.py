@@ -11,10 +11,10 @@ def make_coin_example() -> dict:
     """Creates a random input example for the Coin policy."""
     return {
         "observation/state": np.random.rand(8),
-        "observation/image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
-        "observation/left_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8), 
+        "observation/base_front_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
+        "observation/human_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8), 
         "observation/wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
-        "prompt": "do something",
+        "prompt": "pick the apple",
     }
 
 
@@ -65,7 +65,7 @@ class CoinInputs(transforms.DataTransformFn):
         # of image, e.g. wrist images, you can comment it out here and replace it with zeros like we do for the
         # right wrist image below.
         base_front_image = _parse_image(data["observation/base_front_image"])
-        left_image = _parse_image(data["observation/left_image"])
+        human_image = _parse_image(data["observation/human_image"])
         wrist_image = _parse_image(data["observation/wrist_image"])
 
         # Create inputs dict. Do not change the keys in the dict below.
@@ -73,14 +73,14 @@ class CoinInputs(transforms.DataTransformFn):
             "state": state,
             "image": {
                 "base_front_0_rgb": base_front_image,
-                "left_0_rgb": left_image,
+                "human_0_rgb": human_image,
                 "left_wrist_0_rgb": wrist_image,
                 # Pad any non-existent images with zero-arrays of the appropriate shape.
                 "right_wrist_0_rgb": np.zeros_like(base_front_image),
             },
             "image_mask": {
                 "base_front_0_rgb": np.True_,
-                "left_0_rgb": np.True_,
+                "human_0_rgb": np.True_,
                 "left_wrist_0_rgb": np.True_,
                 # Mask any non-existent images with False (if ``mask_padding`` is True).
                 "right_wrist_0_rgb": np.False_ if mask_padding else np.True_,
